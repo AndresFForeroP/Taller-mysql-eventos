@@ -149,12 +149,12 @@ END | utf8mb4              | utf8mb4_0900_ai_ci   | utf8mb4_0900_ai_ci |
 ```mysql
 DELIMITER //
 
-CREATE PROCEDURE ComprobarStock()
+CREATE PROCEDURE ComprobarStock(IN cantidad INT)
 BEGIN
 	INSERT INTO alerta_stock(ingrediente_id, stock_actual, fecha_alerta)
     SELECT id, stock, NOW()
     FROM ingrediente
-    WHERE stock < 5;
+    WHERE stock < cantidad;
 END //
 
 DELIMITER ;
@@ -171,7 +171,7 @@ ON SCHEDULE AT NOW() + INTERVAL 1 MINUTE
 ON COMPLETION NOT PRESERVE
 DO
 BEGIN 
-	CALL ComprobarStock();
+	CALL ComprobarStock(5);
 END //
 
 DELIMITER ;
@@ -185,7 +185,7 @@ mysql> SHOW CREATE EVENT ev_stock_bajo;
 | Event         | sql_mode                                                                                                              | time_zone | Create Event                                                                                                                                                        | character_set_client | collation_connection | Database Collation |
 +---------------+-----------------------------------------------------------------------------------------------------------------------+-----------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------+----------------------+----------------------+--------------------+
 | ev_stock_bajo | ONLY_FULL_GROUP_BY,STRICT_TRANS_TABLES,NO_ZERO_IN_DATE,NO_ZERO_DATE,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION | SYSTEM    | CREATE DEFINER=`root`@`localhost` EVENT `ev_stock_bajo` ON SCHEDULE AT '2025-07-09 22:30:17' ON COMPLETION NOT PRESERVE ENABLE DO BEGIN 
-CALL ComprobarStock();
+CALL ComprobarStock(5);
 END | utf8mb4              | utf8mb4_0900_ai_ci   | utf8mb4_0900_ai_ci |
 +---------------+-----------------------------------------------------------------------------------------------------------------------+-----------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------+----------------------+----------------------+--------------------+
 1 row in set (0,00 sec)
@@ -194,3 +194,83 @@ END | utf8mb4              | utf8mb4_0900_ai_ci   | utf8mb4_0900_ai_ci |
 
 4.Monitoreo Continuo de Stock: cada 30 minutos, revisar ingredientes con stock < 10 e insertar alertas en `alerta_stock`, **dejando** el evento activo para siempre llamado `ev_monitor_stock_bajo`.
 
+**SOLUCIÓN EVENTO**
+
+```mysql
+DROP EVENT IF EXISTS ev_monitor_stock_bajo;
+DELIMITER //
+
+CREATE EVENT IF NOT EXISTS ev_monitor_stock_bajo
+ON SCHEDULE
+	EVERY 30 MINUTE
+	STARTS NOW() + INTERVAL 30 MINUTE
+ON COMPLETION PRESERVE
+DO
+BEGIN 
+	CALL ComprobarStock(10);
+END //
+
+DELIMITER ;
+```
+
+**RESULTADO**
+
+```mysql
+SHOW CREATE EVENT ev_monitor_stock_bajo;
++-----------------------+-----------------------------------------------------------------------------------------------------------------------+-----------+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+----------------------+----------------------+--------------------+
+| Event                 | sql_mode                                                                                                              | time_zone | Create Event                                                                                                                                                                                  | character_set_client | collation_connection | Database Collation |
++-----------------------+-----------------------------------------------------------------------------------------------------------------------+-----------+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+----------------------+----------------------+--------------------+
+| ev_monitor_stock_bajo | ONLY_FULL_GROUP_BY,STRICT_TRANS_TABLES,NO_ZERO_IN_DATE,NO_ZERO_DATE,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION | SYSTEM    | CREATE DEFINER=`root`@`localhost` EVENT `ev_monitor_stock_bajo` ON SCHEDULE EVERY 30 MINUTE STARTS '2025-07-10 01:31:10' ON COMPLETION PRESERVE ENABLE DO BEGIN 
+CALL ComprobarStock(10);
+END | utf8mb4              | utf8mb4_0900_ai_ci   | utf8mb4_0900_ai_ci |
++-----------------------+-----------------------------------------------------------------------------------------------------------------------+-----------+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+----------------------+----------------------+--------------------+
+1 row in set (0,00 sec)
+```
+
+5.Limpieza de Resúmenes Antiguos: una sola vez, eliminar de `resumen_ventas` los registros con fecha anterior a hace 365 días y luego borrar el evento llamado `ev_purgar_resumen_antiguo`.
+
+**PROCESO ALMACENADO**
+
+```mysql
+DELIMITER //
+
+CREATE PROCEDURE PurgarResumen()
+BEGIN
+	DELETE FROM resumen_ventas
+	WHERE creado_en < DATE_SUB(CURRENT_DATE(),INTERVAL 365 DAY);
+END //
+
+DELIMITER ;
+```
+
+**SOLUCION EVENTO**
+
+```mysql
+DROP EVENT IF EXISTS ev_purgar_resumen_antiguo;
+DELIMITER //
+
+CREATE EVENT IF NOT EXISTS ev_purgar_resumen_antiguo
+ON SCHEDULE AT NOW() + INTERVAL 1 MINUTE
+ON COMPLETION NOT PRESERVE
+DO
+BEGIN 
+	CALL PurgarResumen();
+END //
+
+DELIMITER ;
+```
+
+**RESULTADO**
+
+```mysql
+mysql> SHOW CREATE EVENT ev_purgar_resumen_antiguo;
++---------------------------+-----------------------------------------------------------------------------------------------------------------------+-----------+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+----------------------+----------------------+--------------------+
+| Event                     | sql_mode                                                                                                              | time_zone | Create Event                                                                                                                                                                   | character_set_client | collation_connection | Database Collation |
++---------------------------+-----------------------------------------------------------------------------------------------------------------------+-----------+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+----------------------+----------------------+--------------------+
+| ev_purgar_resumen_antiguo | ONLY_FULL_GROUP_BY,STRICT_TRANS_TABLES,NO_ZERO_IN_DATE,NO_ZERO_DATE,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION | SYSTEM    | CREATE DEFINER=`root`@`localhost` EVENT `ev_purgar_resumen_antiguo` ON SCHEDULE AT '2025-07-10 01:15:11' ON COMPLETION NOT PRESERVE ENABLE DO BEGIN 
+CALL PurgarResumen();
+END | utf8mb4              | utf8mb4_0900_ai_ci   | utf8mb4_0900_ai_ci |
++---------------------------+-----------------------------------------------------------------------------------------------------------------------+-----------+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+----------------------+----------------------+--------------------+
+1 row in set (0,00 sec)
+
+```
